@@ -142,8 +142,8 @@ body {
 
 .container {
     max-width: 1000px;
-    margin: 50px auto 0;
-    padding: 40px 20px;
+    margin: 0 auto;
+    padding: 10px 20px 40px;
     transition: margin-left 0.6s ease;
 }
 
@@ -495,6 +495,34 @@ footer a:hover {
     border-right: 5px solid transparent;
     border-top: 5px solid #333;
     z-index: 1001;
+}
+
+/* 标题区域背景横幅 —— 全宽，紧贴导航栏 */
+.hero-banner {
+    position: relative;
+    width: 100%;
+    margin-top: 50px;
+    padding: 0;
+}
+
+.hero-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('./images/background_gallery_big.gif');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.25;
+    z-index: 0;
+}
+
+.hero-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 40px 20px 16px;
 }
 
 /* 醒目说明样式 */
