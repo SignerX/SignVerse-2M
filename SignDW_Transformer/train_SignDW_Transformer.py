@@ -512,8 +512,18 @@ def prepare_pose_for_render(
         filtered = filter_pose_by_confidence(pose, conf_threshold=conf_threshold)
     else:
         # Skip filtering - use all keypoints regardless of confidence score
-        # This matches StableSigner's approach where scores are used for color intensity, not filtering
+        # The drawing helpers still use scores to gate body limbs and scale
+        # hand/face colors, so force valid coordinates to full render confidence.
+        # This affects visualization only; it does not change training targets.
         filtered = pose
+        body_valid = (filtered["bodies"][:, 0] > 1e-6) & (filtered["bodies"][:, 1] > 1e-6)
+        filtered["body_scores"] = np.where(body_valid, 1.0, 0.0).astype(np.float32)
+
+        hand_valid = (filtered["hands"][..., 0] > 1e-6) & (filtered["hands"][..., 1] > 1e-6)
+        filtered["hands_scores"] = np.where(hand_valid, 1.0, 0.0).astype(np.float32)
+
+        face_valid = (filtered["faces"][..., 0] > 1e-6) & (filtered["faces"][..., 1] > 1e-6)
+        filtered["faces_scores"] = np.where(face_valid, 1.0, 0.0).astype(np.float32)
 
     # Visualization-only torso fix from Sign-X notes: DWpose can keep hip
     # coordinates while suppressing hip scores, which removes neck-to-hip lines.
