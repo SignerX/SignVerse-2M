@@ -9,7 +9,6 @@ The project is motivated by a practical observation from the broader generation 
 - We construct **SignVerse-2M**, a multilingual pose-native corpus that systematically turns public sign language videos into DWPose sequences suitable for generative modeling.
 - We position the dataset as a **sign language interface for modern pose-driven generation**, rather than as a side product of raw-video preprocessing.
 - We provide **task definitions and a simple SignDW Transformer baseline** to validate practical usability under a shared multilingual evaluation setup.
-- We document both the **strengths** of the representation for open-world robustness and its **current limitations** in fine-grained hand shape, non-manual signals, and linguistic completeness.
 
 <!--
 ## Current Limitations
