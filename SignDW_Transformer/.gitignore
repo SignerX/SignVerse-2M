@@ -1,0 +1,11 @@
+# Log files
+log/
+
+# Dataset files
+dataset/
+__pycache__/
+*.pyc
+*.mp4
+*.txt
+test_*.py
+monitor_*.sh
