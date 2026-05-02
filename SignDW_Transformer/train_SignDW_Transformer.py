@@ -492,17 +492,28 @@ def prepare_pose_for_render(
     vec: np.ndarray,
     conf_threshold: float = 0.6,
     denormalize: bool = False,
+    use_confidence_filter: bool = False,
 ) -> Dict[str, Any]:
     """Prepare pose vector for rendering.
 
     Args:
         vec: Pose vector (384-dim or 385-dim with counter)
-        conf_threshold: Confidence threshold for filtering
+        conf_threshold: Confidence threshold for filtering (default 0.6)
         denormalize: If True, multiply coords by 100 (only if they were normalized during training)
+        use_confidence_filter: If True, filter keypoints by confidence score.
+                              If False (default), skip filtering like StableSigner.
+                              This is important for NPZ data with -1.0 score markers.
     """
     pose = vector_to_pose_dict(vec, denormalize=denormalize)
     original_bodies = np.array(pose["bodies"], copy=True)
-    filtered = filter_pose_by_confidence(pose, conf_threshold=conf_threshold)
+
+    # Apply confidence filtering only if enabled
+    if use_confidence_filter:
+        filtered = filter_pose_by_confidence(pose, conf_threshold=conf_threshold)
+    else:
+        # Skip filtering - use all keypoints regardless of confidence score
+        # This matches StableSigner's approach where scores are used for color intensity, not filtering
+        filtered = pose
 
     # Visualization-only torso fix from Sign-X notes: DWpose can keep hip
     # coordinates while suppressing hip scores, which removes neck-to-hip lines.
@@ -511,7 +522,11 @@ def prepare_pose_for_render(
             x, y = original_bodies[hip_idx]
             if x > 1e-6 and y > 1e-6:
                 filtered["bodies"][hip_idx] = original_bodies[hip_idx]
-                filtered["body_scores"][0, hip_idx] = hip_idx
+                body_scores = filtered["body_scores"]
+                if body_scores.ndim == 1:
+                    body_scores[hip_idx] = 1.0
+                elif body_scores.ndim >= 2:
+                    body_scores[..., hip_idx] = 1.0
     return filtered
 
 
