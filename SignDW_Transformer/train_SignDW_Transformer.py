@@ -1618,7 +1618,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--decoder-layers", type=int, default=4)
     parser.add_argument("--ff-dim", type=int, default=2048)
     parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--noise-rate", type=float, default=1.5, help="Gaussian noise augmentation rate (0.0 to disable, 1.5 following StableSigner)")
+    parser.add_argument("--noise-rate", type=float, default=0.0, help="Gaussian noise augmentation rate (0.0 to disable)")
 
     parser.add_argument("--max-steps", type=int, default=20000)
     parser.add_argument("--eval-every", type=int, default=500)
