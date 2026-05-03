@@ -36,7 +36,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Sampler
 
 from utils.draw_dw_lib import draw_pose, filter_pose_by_confidence
 
@@ -328,6 +328,24 @@ def split_by_video(
     return train, test, sorted(train_ids), sorted(set(video_ids) - train_ids)
 
 
+def limit_segments_by_video(
+    segments: Sequence[Segment],
+    max_videos: int,
+    seed: int,
+) -> Tuple[List[Segment], List[str], int]:
+    """Limit segments to at most max_videos unique videos before train/test split."""
+    video_ids = sorted({seg.video_id for seg in segments})
+    if max_videos <= 0 or len(video_ids) <= max_videos:
+        return list(segments), video_ids, len(video_ids)
+
+    rng = random.Random(seed)
+    selected_ids = list(video_ids)
+    rng.shuffle(selected_ids)
+    selected_set = set(selected_ids[:max_videos])
+    limited = [seg for seg in segments if seg.video_id in selected_set]
+    return limited, sorted(selected_set), len(video_ids)
+
+
 def _payload_get(payload: Dict[str, Any], name: str, default: np.ndarray) -> np.ndarray:
     for prefix in ("person_000", "person_0", "person_00"):
         key = f"{prefix}_{name}"
@@ -569,8 +587,16 @@ class SignDWSegmentDataset(Dataset):
         cached = self._npz_cache.get(npz_path)
         if cached is not None:
             return cached
+        load_start = time.time()
         data = np.load(npz_path, allow_pickle=True)
         payloads = data["frame_payloads"]
+        elapsed = time.time() - load_start
+        if elapsed >= 1.0:
+            print(
+                f"loaded_pose_npz video={npz_path.parents[1].name} "
+                f"frames={len(payloads)} elapsed={elapsed:.1f}s",
+                flush=True,
+            )
         # Keep np.load handle alive by caching it too.
         self._npz_cache[npz_path] = payloads
         return payloads
@@ -647,6 +673,49 @@ def collate_batch(items: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "text": [x["text"] for x in items],
         "video_id": [x["video_id"] for x in items],
     }
+
+
+class VideoBatchSampler(Sampler[List[int]]):
+    """Yield batches grouped by video to reuse per-video NPZ payload caches."""
+
+    def __init__(
+        self,
+        segments: Sequence[Segment],
+        batch_size: int,
+        shuffle: bool = True,
+        seed: int = 0,
+    ) -> None:
+        self.batch_size = max(1, int(batch_size))
+        self.shuffle = shuffle
+        self.seed = seed
+        self.epoch = 0
+        by_video: Dict[str, List[int]] = {}
+        for idx, seg in enumerate(segments):
+            by_video.setdefault(seg.video_id, []).append(idx)
+        self.by_video = by_video
+        self.video_ids = sorted(by_video)
+
+    def __iter__(self):
+        rng = random.Random(self.seed + self.epoch)
+        self.epoch += 1
+        video_ids = list(self.video_ids)
+        if self.shuffle:
+            rng.shuffle(video_ids)
+
+        batches: List[List[int]] = []
+        for video_id in video_ids:
+            indices = list(self.by_video[video_id])
+            if self.shuffle:
+                rng.shuffle(indices)
+            for start in range(0, len(indices), self.batch_size):
+                batches.append(indices[start : start + self.batch_size])
+
+        if self.shuffle:
+            rng.shuffle(batches)
+        yield from batches
+
+    def __len__(self) -> int:
+        return sum((len(indices) + self.batch_size - 1) // self.batch_size for indices in self.by_video.values())
 
 
 def sinusoidal_positions(max_len: int, dim: int) -> torch.Tensor:
@@ -810,8 +879,12 @@ class TextToDWPoseTransformer(nn.Module):
         """
         batch_size, seq_len, _ = target_poses.shape
 
-        # Apply Gaussian noise augmentation (following StableSigner)
-        decoder_input = target_poses.clone()
+        # Teacher forcing input must be shifted right: BOS/zero pose at t=0,
+        # then previous ground-truth poses. Otherwise the decoder can copy the
+        # current pose during training, while inference starts from zeros.
+        decoder_input = torch.zeros_like(target_poses)
+        if seq_len > 1:
+            decoder_input[:, 1:, :] = target_poses[:, :-1, :]
         if self.training and self.noise_rate > 0:
             noise = torch.randn_like(decoder_input) * self.out_stds.unsqueeze(0).unsqueeze(0)
             # Don't add noise to counter (last dimension)
@@ -1343,6 +1416,16 @@ def train(args: argparse.Namespace) -> None:
         segments = [seg for seg in segments if seg.sign_language == selected_sign_language]
         if not segments:
             raise RuntimeError(f"No segments left after filtering by sign language '{selected_sign_language}'")
+    segments, selected_video_ids, available_video_count = limit_segments_by_video(
+        segments,
+        max_videos=args.max_videos,
+        seed=args.seed,
+    )
+    print(
+        f"Using videos: {len(selected_video_ids)}/{available_video_count} "
+        f"(max_videos={args.max_videos}) segments={len(segments)}",
+        flush=True,
+    )
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     output_dir = output_base_dir / timestamp
@@ -1370,6 +1453,9 @@ def train(args: argparse.Namespace) -> None:
         "selected_sign_language": selected_sign_language,
         "sign_language_summary": summarize_sign_languages(segments),
         "center_square_crop": args.center_square_crop,
+        "max_videos": args.max_videos,
+        "available_videos_after_language_filter": available_video_count,
+        "selected_video_ids": selected_video_ids,
         "num_segments": len(segments),
         "train_segments": len(train_segments),
         "test_segments": len(test_segments),
@@ -1402,14 +1488,34 @@ def train(args: argparse.Namespace) -> None:
         pose_std=pose_std,
         center_square_crop=args.center_square_crop,
     )
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        collate_fn=collate_batch,
-        pin_memory=torch.cuda.is_available(),
-    )
+    if args.batch_by_video:
+        train_batch_sampler = VideoBatchSampler(
+            train_segments,
+            batch_size=args.batch_size,
+            shuffle=True,
+            seed=args.seed,
+        )
+        print(
+            f"Using video-grouped train batches: videos={len(train_batch_sampler.video_ids)} "
+            f"batches_per_epoch={len(train_batch_sampler)} batch_size={args.batch_size}",
+            flush=True,
+        )
+        train_loader = DataLoader(
+            train_ds,
+            batch_sampler=train_batch_sampler,
+            num_workers=args.num_workers,
+            collate_fn=collate_batch,
+            pin_memory=torch.cuda.is_available(),
+        )
+    else:
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.num_workers,
+            collate_fn=collate_batch,
+            pin_memory=torch.cuda.is_available(),
+        )
     test_loader = DataLoader(
         test_ds,
         batch_size=args.batch_size,
@@ -1449,7 +1555,11 @@ def train(args: argparse.Namespace) -> None:
     latest_step_ckpt: Optional[Path] = None
 
     for step in range(1, args.max_steps + 1):
+        data_wait_start = time.time()
         batch = next(train_iter)
+        data_wait = time.time() - data_wait_start
+        if data_wait >= 5.0:
+            print(f"step={step:06d} data_loader_wait={data_wait:.1f}s", flush=True)
         text_ids = batch["text_ids"].to(device, non_blocking=True)
         poses = batch["poses"].to(device, non_blocking=True)
         pose_mask = batch["pose_mask"].to(device, non_blocking=True)
@@ -1605,6 +1715,7 @@ def build_argparser() -> argparse.ArgumentParser:
 
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--seed", type=int, default=27)
+    parser.add_argument("--max-videos", type=int, default=100, help="Maximum videos to use after sign-language filtering; 0 disables the limit.")
     parser.add_argument("--min-segment-frames", type=int, default=8)
     parser.add_argument("--max-samples-per-video", type=int, default=128)
     parser.add_argument("--max-text-len", type=int, default=96)
@@ -1622,7 +1733,9 @@ def build_argparser() -> argparse.ArgumentParser:
 
     parser.add_argument("--max-steps", type=int, default=20000)
     parser.add_argument("--eval-every", type=int, default=500)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=120)
+    parser.add_argument("--batch-by-video", dest="batch_by_video", action="store_true", default=True)
+    parser.add_argument("--random-segment-batches", dest="batch_by_video", action="store_false")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--min-lr", type=float, default=1e-5)
