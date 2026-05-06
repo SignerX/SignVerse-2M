@@ -1,12 +1,12 @@
-# SignVerse-2M
-
-**Pose preprocessing and SignDW Transformer baseline code**
+# SignVerse-2M: Pose preprocessing, Visualization and SignDW Transformer baseline code
 
 This repository contains the engineering code for DWPose-based sign language pose preprocessing and the initial SignDW Transformer baseline. The README focuses on code paths, pose format, scripts, and reproducible commands.
 
 The main implementation lives in `SignDW_Transformer/`.
 
-![SignVerse-2M cover](./static/images/cover.png)
+<p align="center">
+  <img src="./static/images/background_gallery_big_title.gif" alt="SignVerse-2M cover" width="100%">
+</p>
 
 ## What Is Included
 
@@ -60,13 +60,6 @@ pip install numpy opencv-python pillow matplotlib tqdm
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install onnxruntime-gpu huggingface_hub yt-dlp
 ```
-
-Additional system tools:
-
-- `ffmpeg` and `ffprobe` for video decoding and rendering;
-- `easy_dwpose` and its DWPose ONNX checkpoints for pose extraction;
-- optional SLURM commands for `runtime_status.py` on cluster runs;
-- optional Hugging Face credentials for dataset upload.
 
 The optimized DWPose path expects checkpoint files such as:
 
@@ -129,7 +122,7 @@ python train_SignDW_Transformer.py \
   --output-video log/inference.mp4
 ```
 
-## SignDW Transformer Baseline
+## About SignDW Transformer Baseline
 
 `train_SignDW_Transformer.py` implements a compact text-to-DWPose Transformer baseline:
 
@@ -160,7 +153,7 @@ Important training options:
 --render-every N                 render prediction/comparison videos periodically
 ```
 
-## Run Preprocessing Locally
+## Process Your Own Dataset
 
 Prepare metadata, subtitles, and videos:
 
