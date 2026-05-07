@@ -1,6 +1,6 @@
 ## Data Pipeline
 
-SignVerse-2M is not defined by a single export script. It is built as a staged processing system with manifest-driven sample management, subtitle structuring, video acquisition, pose extraction, status tracking, and sharded publication. The current repository metadata covers **39,196 videos** and approximately **2M segments**.
+SignVerse-2M is not defined by a single export script. It is built as a staged processing system with manifest-driven sample management, subtitle structuring, video acquisition, pose extraction, status tracking, and sharded publication. The current repository metadata covers **39,196 videos** and approximately **2M segments**, constructing based on [YouTube-SL-25](https://arxiv.org/abs/2407.11144).
 
 ![Overview of the SignVerse-2M data processing pipeline](./static/images/pipeline.png)
 
